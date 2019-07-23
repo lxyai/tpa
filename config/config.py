@@ -18,7 +18,7 @@ config = {
         },
         "x": {
             "range": [-47, 0],
-            "key": ['day_month',
+            "key": ['day_month',re
                     'rest_flag',
                     'holiday_flag',
                     'feat_month1',
@@ -131,7 +131,6 @@ config = {
                     ('wind_direction_to', 'wuhan'),
                     ('wind_direction_to', 'xian')]
         },
-        "z": None,
         "shuffle": True,
         "num_epoch": 20,
         "batch_size": 32,
