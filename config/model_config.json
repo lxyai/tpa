@@ -1,6 +1,0 @@
-{
-  "attention_len": 64,
-  "batch_size": 32,
-  "output_size": 321,
-
-}
