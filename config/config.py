@@ -18,8 +18,7 @@ config = {
         },
         "x": {
             "range": [-47, 0],
-            "key": ['date',
-                    'day_month',
+            "key": ['day_month',
                     'rest_flag',
                     'holiday_flag',
                     'feat_month1',
