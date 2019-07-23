@@ -102,10 +102,7 @@ class PolyRNN:
         #         state_keep_prob=(1.0 - self.para.dropout)
         #     )
 
-        def test():
-            return cell
-
-        cell = tf.cond(tf.equal(self.mode, self.train_mode), self._build_dropout_wrapper(cell), test())
+        cell = tf.cond(tf.equal(self.mode, self.train_mode), self._build_dropout_wrapper(cell), lambda: cell)
         cell = TemporalPatternAttentionCellWrapper(cell, self.para.attention_len)
         return cell
 
@@ -116,4 +113,4 @@ class PolyRNN:
             output_keep_prob=(1.0 - self.para.dropout),
             state_keep_prob=(1.0 - self.para.dropout)
         )
-        return cell
+        return lambda: cell
