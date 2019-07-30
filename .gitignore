@@ -1,2 +1,7 @@
 utils/__pycache__
 .idea/workspace.xml
+ckpt/
+ckpt1/
+config/__pycache__/
+ipynb/
+models/__pycache__/

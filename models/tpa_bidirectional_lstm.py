@@ -1,14 +1,13 @@
 import tensorflow as tf
-from utils.attention_wrapper import TemporalPatternAttentionCellWrapper
+from utils.attention_wrapper_v1 import TemporalPatternAttentionCellWrapper
 
-class PolyRNN:
+# from utils.attention_wrapper import TemporalPatternAttentionCellWrapper
+
+
+class TPABIDIRECTIONALLSTM:
     def __init__(self, para):
         self.para = para
         self.dtype = tf.float32
-        self.mode = tf.placeholder(dtype=tf.string, name='mode')
-        self.train_mode = tf.constant('train', dtype=tf.string, name='train_mode')
-        self.validation_mode = tf.constant('validation', dtype=tf.string, name='validation_mode')
-        self.test_mode = tf.constant('test', dtype=tf.string, name='test_mode')
         self.global_step = tf.Variable(0, trainable=False, name='global_step')
 
         self._build_graph()
@@ -17,18 +16,34 @@ class PolyRNN:
         self.saver = tf.train.Saver(max_to_keep=3)
 
     def _build_graph(self):
-        print('Building graph...')
+        print('Building {} graph...'.format(self.para.mode))
+        x_length = self.para.data_config.x.range[1] - self.para.data_config.x.range[0] + 1
+        y_length = self.para.data_config.y.range[1] - self.para.data_config.y.range[0] + 1
+        z_length = self.para.data_config.z.range[1] - self.para.data_config.z.range[0] + 1
+
+        y_channel = len(self.para.data_config.y.key)
+        assert x_length == self.para.attention_len
+
         self.x = tf.placeholder(dtype=tf.float32,
                                 shape=[None, self.para.attention_len, len(self.para.data_config.x.key)],
                                 name='x')
 
         self.y = tf.placeholder(dtype=tf.float32,
-                                shape=[None, 1, len(self.para.data_config.y.key)],
+                                shape=[None,
+                                       y_length,
+                                       len(self.para.data_config.y.key)],
                                 name='y')
 
-        self.rnn_inputs_embed = tf.nn.relu(
-            tf.layers.dense(self.x, self.para.num_units)
-        )
+        self.z = tf.placeholder(dtype=tf.float32,
+                                shape=[None,
+                                       z_length,
+                                       len(self.para.data_config.z.key)],
+                                name='z')
+
+        with tf.variable_scope('TPABlock'):
+            self.rnn_inputs_embed = tf.nn.relu(
+                tf.layers.dense(self.x, self.para.num_units)
+            )
 
         self.rnn_inputs_embed = tf.unstack(self.rnn_inputs_embed, axis=1)
 
@@ -44,26 +59,37 @@ class PolyRNN:
             axis=1
         )
 
-        self.rnn_outputs = []
+        self.future_tpa_outputs = tf.reshape(
+            tf.layers.dense(self.final_rnn_states, y_length * self.para.num_units),
+            [-1, y_length, self.para.num_units]
+        )
 
-        for i in range(self.para.data_config.y.range[1] - self.para.data_config.y.range[0] + 1):
-            self.rnn_outputs.append(tf.layers.dense(self.final_rnn_states, len(self.para.data_config.y.key),
-                                                        name='rnn_output{}'.format(i)))
-        self.all_rnn_outputs = tf.stack(self.rnn_outputs, axis=1)
+        with tf.variable_scope('LSTMNetWork'):
+            self.lstm_inputs = tf.layers.dense(self.z, self.para.num_units)
+            self.all_lstm_outputs, self.final_lstm_states = tf.nn.bidirectional_dynamic_rnn(
+                cell_fw=tf.contrib.rnn.LSTMCell(self.para.num_units),
+                cell_bw=tf.contrib.rnn.LSTMCell(self.para.num_units),
+                inputs=self.lstm_inputs,
+                dtype=self.dtype
+            )
+            self.future_lstm_outputs = tf.slice(
+                tf.concat(self.all_lstm_outputs, axis=2),
+                [0, x_length, 0],
+                [-1, y_length, -1]
+            )
 
-        self.loss = self._compute_loss(self.all_rnn_outputs, self.y)
-
+        self.final_outputs = tf.layers.dense(
+            tf.concat([self.future_tpa_outputs, self.future_lstm_outputs], axis=2),
+            y_channel
+        )
 
         # if self.para.highway > 0:
-        #     reg_outputs = tf.transpose(self.x[:, -self.para.highway:, :], [0, 2, 1])
-        #     reg_outputs = tf.layers.dense(reg_outputs, 1)
-        #     self.all_rnn_outputs += tf.squeeze(reg_outputs)
+        #     self.reg_outputs = tf.expand_dims(
+        #         tf.layers.dense(self.x[:, -self.para.highway:, 0], y_length, use_bias=False), axis=2)
 
-        # if self.para.mode == 'train' or self.para.mode == 'validation':
-        #     self.labels = tf.squeeze(self.y, axis=1)
-        #     self.loss = self._compute_loss(self.all_rnn_outputs, self.labels)
-        # elif self.para.mode == 'test':
-        #     self.labels = tf.squeeze(self.y, axis=1)
+        # self.final_outputs = self.merge_outputs + self.reg_outputs
+
+        self.loss = self._compute_loss(self.final_outputs, self.y)
 
     def _build_optimizer(self):
         print('Building optimizer...')
@@ -76,6 +102,8 @@ class PolyRNN:
                 0.995,
                 staircase=True
             )
+        else:
+            lr = self.para.learning_rate
         self.opt = tf.train.AdamOptimizer(lr)
         gradients = tf.gradients(self.loss, trainable_variables)
         clip_gradients, _ = tf.clip_by_global_norm(gradients, self.para.max_gradient_norm)
@@ -92,6 +120,9 @@ class PolyRNN:
     def _build_rnn_cell(self):
         return tf.contrib.rnn.MultiRNNCell([self._build_single_cell() for _ in range(self.para.num_layers)])
 
+    def _build_lstm_cell(self):
+        return tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.LSTMCell(self.para.num_units) for _ in range(2)])
+
     def _build_single_cell(self):
         cell = tf.contrib.rnn.LSTMBlockCell(self.para.num_units)
         if self.para.mode == 'train':
@@ -101,6 +132,5 @@ class PolyRNN:
                 output_keep_prob=(1.0 - self.para.dropout),
                 state_keep_prob=(1.0 - self.para.dropout)
             )
-
         cell = TemporalPatternAttentionCellWrapper(cell, self.para.attention_len)
         return cell
