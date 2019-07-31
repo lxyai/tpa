@@ -9,6 +9,7 @@ class Field:
         self.st = 0
         self.ed = 0
         self.values = None
+        self.mean = None
 
 
 class TimeSeriesDataset:
@@ -47,6 +48,9 @@ class TimeSeriesDataset:
         for i in range(x.st, x.ed+1, self.para['step']):
             x_example.append(np.expand_dims(x.values[i: i + x.length], axis=0))
         x.values = np.concatenate(x_example, axis=0)
+        x.min = np.array([np.min(v, axis=0) for v in x.values])
+        x.max = np.array([np.max(v, axis=0) for v in x.values])
+        x.normal_values = np.zeros(x.values.shape, np.float32)
 
         y = Field()
         y.length = y2 - y1 + 1
