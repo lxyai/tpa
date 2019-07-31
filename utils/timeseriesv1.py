@@ -80,6 +80,9 @@ class TimeSeriesDataset:
         for data in zip(*zip_list):
             dataset.append(list(data))
 
+        # if self.para['shuffle']:
+        #     shuffle(dataset)
+
         data_size = len(dataset)
         split = [int(i * data_size) for i in self.para.split]
         self.dataset = []
@@ -139,6 +142,28 @@ class TimeSeriesDataset:
             self.validation_status['stop'] = True
         data = self.validation_status['data'][idx:idx + batch_size]
         self.validation_status['idx'] = idx + batch_size
+        batch_data = []
+        for n in zip(*data):
+            batch_data.append(n)
+        if len(batch_data) == 2:
+            x = np.concatenate([np.expand_dims(i, axis=0) for i in batch_data[0]])
+            y = np.concatenate([np.expand_dims(i, axis=0) for i in batch_data[1]])
+            return x, y
+        if len(batch_data) == 3:
+            x = np.concatenate([np.expand_dims(i, axis=0) for i in batch_data[0]])
+            y = np.concatenate([np.expand_dims(i, axis=0) for i in batch_data[1]])
+            z = np.concatenate([np.expand_dims(i, axis=0) for i in batch_data[2]])
+            return x, y, z
+        else:
+            raise ValueError('label and feature numbers is not support!')
+
+    def get_test_batch(self):
+        batch_size = 1
+        idx = self.test_status['idx']
+        if idx + batch_size >= len(self.test_status['data']):
+            self.test_status['stop'] = True
+        data = self.test_status['data'][idx:idx + batch_size]
+        self.test_status['idx'] = idx + batch_size
         batch_data = []
         for n in zip(*data):
             batch_data.append(n)
