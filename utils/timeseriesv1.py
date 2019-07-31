@@ -50,7 +50,8 @@ class TimeSeriesDataset:
         x.values = np.concatenate(x_example, axis=0)
         x.min = np.array([np.min(v, axis=0) for v in x.values])
         x.max = np.array([np.max(v, axis=0) for v in x.values])
-        x.normal_values = np.zeros(x.values.shape, np.float32)
+        x.normal_values = np.array([(v - x.min)/(x.max - x.min) for v in x.values])
+        
 
         y = Field()
         y.length = y2 - y1 + 1
