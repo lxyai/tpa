@@ -23,7 +23,7 @@ class TimeSeriesDataset:
         if len(df) <= 0:
             raise ValueError('df is empty!')
 
-        self.df = df
+        # self.df = df
         self.timesteps = len(df)
         self.para = para
         x1, x2 = self.para['x']['range'][0], self.para['x']['range'][1]
@@ -52,11 +52,18 @@ class TimeSeriesDataset:
             x_example.append(np.expand_dims(x.values[i: i + x.length], axis=0))
         x.values = np.concatenate(x_example, axis=0)
         # local normalize x
-        x.min = np.min(x.values, axis=1)
-        x.max = np.max(x.values, axis=1)
-        x.scale = x.max - x.min
-        x.scale[x.scale == 0] = 1
-        x.normal_values = (x.values - np.expand_dims(x.min, axis=1)) / np.expand_dims(x.scale, axis=1)
+        if self.para['normalization'] == 'local':
+            x.min = np.min(x.values, axis=1)
+            x.max = np.max(x.values, axis=1)
+            x.scale = x.max - x.min
+            x.scale[x.scale == 0] = 1
+            x.normal_values = (x.values - np.expand_dims(x.min, axis=1)) / np.expand_dims(x.scale, axis=1)
+        elif self.para['normalization'] == 'global':
+            x.min = np.min(df[self.para['x']['key']].values, axis=0)
+            x.max = np.max(df[self.para['x']['key']].values, axis=0)
+            x.scale = x.max - x.min
+            x.scale[x.scale == 0] = 1
+            x.normal_values = (x.values - x.min) / x.scale
         self.x = x
 
         y = Field()
@@ -69,15 +76,22 @@ class TimeSeriesDataset:
             y_example.append(np.expand_dims(y.values[i: i + y.length], axis=0))
         y.values = np.concatenate(y_example, axis=0)
         # use history min and max for feature label normalization
-        y_history = []
-        y_values = df[self.para['y']['key']].values
-        for i in range(x.st, x.ed, self.para['step']):
-            y_history.append(y_values[i: i + x.length])
-        y.min = np.array([np.min(v, axis=0) for v in y_history])
-        y.max = np.array([np.max(v, axis=0) for v in y_history])
-        y.scale = y.max - y.min
-        y.scale[y.scale == 0] = 1
-        y.normal_values = (y.values - np.expand_dims(y.min, axis=1)) / np.expand_dims(y.scale, axis=1)
+        if self.para['normalization'] == 'local':
+            y_history = []
+            y_values = df[self.para['y']['key']].values
+            for i in range(x.st, x.ed, self.para['step']):
+                y_history.append(y_values[i: i + x.length])
+            y.min = np.array([np.min(v, axis=0) for v in y_history])
+            y.max = np.array([np.max(v, axis=0) for v in y_history])
+            y.scale = y.max - y.min
+            y.scale[y.scale == 0] = 1
+            y.normal_values = (y.values - np.expand_dims(y.min, axis=1)) / np.expand_dims(y.scale, axis=1)
+        elif self.para['normalization'] == 'global':
+            y.min = np.min(df[self.para['y']['key']].values, axis=0)
+            y.max = np.max(df[self.para['y']['key']].values, axis=0)
+            y.scale = y.max - y.min
+            y.scale[y.scale == 0] = 1
+            y.normal_values = (y.values - y.min) / y.scale
         self.y = y
 
         if 'z' in self.para.keys():
@@ -90,11 +104,20 @@ class TimeSeriesDataset:
             for i in range(z.st, z.ed, self.para['step']):
                 z_example.append(np.expand_dims(z.values[i: i + z.length], axis=0))
             z.values = np.concatenate(z_example, axis=0)
-            z.min = np.min(z.values, axis=1)
-            z.max = np.max(z.values, axis=1)
-            z.scale = z.max - z.min
-            z.scale[z.scale == 0] = 1
-            z.normal_values = (z.values - np.expand_dims(z.min, axis=1)) / np.expand_dims(z.scale, axis=1)
+            if self.para['normalization'] == 'local':
+                z.min = np.min(z.values, axis=1)
+                z.max = np.max(z.values, axis=1)
+                z.scale = z.max - z.min
+                z.scale[z.scale == 0] = 1
+                z.normal_values = (z.values - np.expand_dims(z.min, axis=1)) / np.expand_dims(z.scale, axis=1)
+            elif self.para['normalization'] == 'global':
+                z.min = np.min(df[self.para['z']['key']].values, axis=0)
+                z.max = np.max(df[self.para['z']['key']].values, axis=0)
+                z.scale = z.max - z.min
+                z.scale[z.scale == 0] = 1
+                z.normal_values = (z.values - z.min) / z.scale
+        else:
+            z = None
             self.z = z
 
         zip_list = []
@@ -102,7 +125,7 @@ class TimeSeriesDataset:
         for i in [x, y, z]:
             if i is None:
                 continue
-            if self.para['normalization'] == "local":
+            if self.para['normalization']:
                 zip_list.append(i.normal_values)
             else:
                 zip_list.append(i.values)

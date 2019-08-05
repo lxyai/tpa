@@ -1,7 +1,5 @@
 import tensorflow as tf
-from utils.attention_wrapper_v1 import TemporalPatternAttentionCellWrapper
-
-# from utils.attention_wrapper import TemporalPatternAttentionCellWrapper
+from utils.hierarchical_attn_wrapper import HierarchicalAttentionCellWrapper
 
 
 class TPABIDIRECTIONALLSTM:
@@ -40,48 +38,75 @@ class TPABIDIRECTIONALLSTM:
                                        len(self.para.data_config.z.key)],
                                 name='z')
 
-        with tf.variable_scope('TPABlock'):
-            self.rnn_inputs_embed = tf.nn.relu(
-                tf.layers.dense(self.x, self.para.num_units)
-            )
+        rnn_inputs = tf.expand_dims(self.x, axis=3)
+        full_connection_inputs = self._build_multi_conv_layer(rnn_inputs, self.para['filters'])
+        attn_vec = tf.squeeze(tf.layers.dense(full_connection_inputs, 1))
+        all_rnn_states, final_rnn_state = tf.contrib.rnn
 
-            self.rnn_inputs_embed = tf.unstack(self.rnn_inputs_embed, axis=1)
+    def _build_single_conv_layer(self, inputs, filters):
+        conv_out = tf.layers.conv2d(inputs,
+                                    filters=filters,
+                                    kernel_size=[1, 3],
+                                    padding='valid',
+                                    activation=tf.nn.relu)
 
-            self.all_rnn_states, self.final_rnn_states = tf.nn.static_rnn(
-                cell=self._build_rnn_cell(),
-                inputs=self.rnn_inputs_embed,
-                sequence_length=tf.constant([self.para.attention_len for _ in range(self.para.batch_size)], dtype=tf.int32),
-                dtype=self.dtype
-            )
+        max_pool_out = tf.layers.max_pooling2d(conv_out,
+                                               pool_size=[1, 3],
+                                               strides=1,
+                                               padding='valid')
+        return max_pool_out
 
-            self.final_rnn_states = tf.concat(
-                [self.final_rnn_states[i][1] for i in range(self.para.num_layers)],
-                axis=1
-            )
+    def _build_multi_conv_layer(self, inputs, filters):
+        for i, channel in enumerate(filters):
+            with tf.variable_scope('feature_extract{}'.format(i)):
+                inputs = self._build_single_conv_layer(inputs, channel)
+        return inputs
 
-            self.future_tpa_outputs = tf.reshape(
-                tf.layers.dense(self.final_rnn_states, y_length * self.para.num_units),
-                [-1, y_length, self.para.num_units]
-            )
+    def _build_multi_lstm(self):
+        return tf.contrib.rnn.MultiRNNCell([tf.contrib.rnn.LSTMCell(i) for i in self.para['units_of_cells']])
 
-        with tf.variable_scope('LSTMNetWork'):
-            self.lstm_inputs = tf.layers.dense(self.z, self.para.num_units)
-            self.all_lstm_outputs, self.final_lstm_states = tf.nn.bidirectional_dynamic_rnn(
-                cell_fw=tf.contrib.rnn.LSTMCell(self.para.num_units),
-                cell_bw=tf.contrib.rnn.LSTMCell(self.para.num_units),
-                inputs=self.lstm_inputs,
-                dtype=self.dtype
-            )
-            self.future_lstm_outputs = tf.slice(
-                tf.concat(self.all_lstm_outputs, axis=2),
-                [0, x_length, 0],
-                [-1, y_length, -1]
-            )
-
-        self.final_outputs = tf.layers.dense(
-            tf.concat([self.future_tpa_outputs, self.future_lstm_outputs], axis=2),
-            y_channel
-        )
+        # with tf.variable_scope('TPABlock'):
+        #     self.rnn_inputs_embed = tf.nn.relu(
+        #         tf.layers.dense(self.x, self.para.num_units)
+        #     )
+        #
+        #     self.rnn_inputs_embed = tf.unstack(self.rnn_inputs_embed, axis=1)
+        #
+        #     self.all_rnn_states, self.final_rnn_states = tf.nn.static_rnn(
+        #         cell=self._build_rnn_cell(),
+        #         inputs=self.rnn_inputs_embed,
+        #         sequence_length=tf.constant([self.para.attention_len for _ in range(self.para.batch_size)], dtype=tf.int32),
+        #         dtype=self.dtype
+        #     )
+        #
+        #     self.final_rnn_states = tf.concat(
+        #         [self.final_rnn_states[i][1] for i in range(self.para.num_layers)],
+        #         axis=1
+        #     )
+        #
+        #     self.future_tpa_outputs = tf.reshape(
+        #         tf.layers.dense(self.final_rnn_states, y_length * self.para.num_units),
+        #         [-1, y_length, self.para.num_units]
+        #     )
+        #
+        # with tf.variable_scope('LSTMNetWork'):
+        #     self.lstm_inputs = tf.layers.dense(self.z, self.para.num_units)
+        #     self.all_lstm_outputs, self.final_lstm_states = tf.nn.bidirectional_dynamic_rnn(
+        #         cell_fw=tf.contrib.rnn.LSTMCell(self.para.num_units),
+        #         cell_bw=tf.contrib.rnn.LSTMCell(self.para.num_units),
+        #         inputs=self.lstm_inputs,
+        #         dtype=self.dtype
+        #     )
+        #     self.future_lstm_outputs = tf.slice(
+        #         tf.concat(self.all_lstm_outputs, axis=2),
+        #         [0, x_length, 0],
+        #         [-1, y_length, -1]
+        #     )
+        #
+        # self.final_outputs = tf.layers.dense(
+        #     tf.concat([self.future_tpa_outputs, self.future_lstm_outputs], axis=2),
+        #     y_channel
+        # )
 
         # if self.para.highway > 0:
         #     self.reg_outputs = tf.expand_dims(

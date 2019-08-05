@@ -5,3 +5,6 @@ ckpt1/
 config/__pycache__/
 ipynb/
 models/__pycache__/
+.DS_Store
+measure_map_of_tpa/.ipynb_checkpoints/
+measure_map_of_tpa/__pycache__/
